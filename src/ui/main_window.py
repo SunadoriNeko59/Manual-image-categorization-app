@@ -384,52 +384,44 @@ class ImageMultiClassApp:
         if mask_paths is None:
             mask_paths = []
 
-        if method in ("whiteratio_zero", "border_white"):
-            k = 2
-        
-        # マスク手法の場合、クラス数はマスク数+1（No Match用）
-        if method == "mask":
-            if not mask_paths:
-                messagebox.showwarning("警告", "マスク画像が選択されていません")
-                return
-            # マスク画像を読み込む
-            mask_images = []
-            for mp in mask_paths:
-                try:
-                    mask_images.append(Image.open(mp))
-                except Exception as e:
-                    messagebox.showerror("エラー", f"マスク画像の読み込みに失敗しました\n{mp}\n{e}")
-                    return
-            k = len(mask_images) + 1  # マスク数 + No Match
-
-        self.state.save_state()
-        self.undo_btn.config(state="normal")
-        
         # プラグイン判定
         is_plugin = method.startswith("plugin:")
         plugin_name = method.split(":", 1)[1] if is_plugin else None
 
+        self.state.save_state()
+        self.undo_btn.config(state="normal")
+        
+        # マスク画像が必要な場合（プラグイン名に'マスク'が含まれる、または引数として渡すことを期待する場合）
+        mask_images = []
+        if mask_paths:
+            for mp in mask_paths:
+                try:
+                    mask_images.append(Image.open(mp))
+                except Exception as e:
+                    logger.error(f"マスク画像の読み込み失敗: {mp}, {e}")
+
         if target == "all":
-            prefix = plugin_name if is_plugin else ("Auto" if method not in ("whiteratio", "mask") else ("白率" if method == "whiteratio" else "Mask"))
+            prefix = plugin_name if is_plugin else "白率"
             self._reset_classes(k, prefix=prefix)
+            
             if is_plugin:
                 try:
                     pm = PluginManager()
-                    labels = pm.execute_plugin(plugin_name, self.state.images, self.state, k)
-                    self._apply_labels(labels, k)
+                    labels = pm.execute_plugin(plugin_name, self.state.images, self.state, k, mask_images=mask_images)
+                    if labels is not None:
+                        self._apply_labels(labels, k)
+                        # マスクプラグインの場合はオーバーレイを設定
+                        if "マスク" in plugin_name and mask_images:
+                            for mi, mp in enumerate(mask_paths):
+                                if mi < self.state.num_classes:
+                                    self.state.mask_overlays[mi] = mask_images[mi]
+                                    self.state.class_names[mi].set(os.path.splitext(os.path.basename(mp))[0])
+                            if len(mask_images) < self.state.num_classes:
+                                self.state.class_names[len(mask_images)].set("No Match")
                 except Exception as e:
                     logger.error(f"プラグイン実行エラー: {e}")
                     messagebox.showerror("エラー", f"プラグインの実行に失敗しました\n{e}")
                     return
-            elif method == "kmeans":
-                labels = ImageClassifier.kmeans_cluster(self.state.images, k)
-                self._apply_labels(labels, k)
-            elif method == "overlap":
-                labels = ImageClassifier.overlap_cluster(self.state.images, k, dilation_pct=self.state.overlap_dilation_pct.get())
-                if labels is None: 
-                    messagebox.showwarning("警告", "重なり領域が検出できませんでした")
-                    return
-                self._apply_labels(labels, k)
             elif method == "whiteratio":
                 self.state.whiteratio_mode = True
                 self.reclassify_btn.pack(side="left", padx=5)
@@ -440,24 +432,6 @@ class ImageMultiClassApp:
                     self.state.class_names[i].set(f"{i*step:.0f}%〜{(i+1)*step:.0f}%")
                 self.reclassify_by_white_ratio()
                 self._build_tree(k)
-            elif method == "whiteratio_zero":
-                labels = ImageClassifier.whiteratio_zero_cluster(self.state.white_ratios)
-                self.state.class_names[0].set("白率 0%")
-                self.state.class_names[1].set("白率 0%超")
-                self._apply_labels(labels, k)
-            elif method == "border_white":
-                labels = ImageClassifier.border_white_cluster(self.state.images)
-                self.state.class_names[0].set("外周に白なし")
-                self.state.class_names[1].set("外周に白あり")
-                self._apply_labels(labels, k)
-            elif method == "mask":
-                labels = ImageClassifier.mask_cluster(self.state.images, mask_images)
-                for mi, mp in enumerate(mask_paths):
-                    basename = os.path.splitext(os.path.basename(mp))[0]
-                    self.state.class_names[mi].set(basename)
-                    self.state.mask_overlays[mi] = mask_images[mi]
-                self.state.class_names[len(mask_paths)].set("No Match")
-                self._apply_labels(labels, k)
         else:
             t_class = int(target)
             t_indices = [i for i, vp in enumerate(self.state.class_vars) if vp[t_class].get()]
@@ -467,41 +441,19 @@ class ImageMultiClassApp:
             if is_plugin:
                 try:
                     pm = PluginManager()
-                    labels = pm.execute_plugin(plugin_name, t_images, self.state, k)
+                    labels = pm.execute_plugin(plugin_name, t_images, self.state, k, mask_images=mask_images)
                 except Exception as e:
                     logger.error(f"プラグイン実行エラー: {e}")
                     messagebox.showerror("エラー", f"プラグインの実行に失敗しました\n{e}")
                     return
-            elif method == "kmeans": labels = ImageClassifier.kmeans_cluster(t_images, k)
-            elif method == "overlap": labels = ImageClassifier.overlap_cluster(t_images, k, dilation_pct=self.state.overlap_dilation_pct.get())
-            elif method == "whiteratio": labels = ImageClassifier.whiteratio_cluster([self.state.white_ratios[i] for i in t_indices], k)
-            elif method == "whiteratio_zero":
-                labels = ImageClassifier.whiteratio_zero_cluster([self.state.white_ratios[i] for i in t_indices])
-            elif method == "border_white":
-                labels = ImageClassifier.border_white_cluster(t_images)
-            elif method == "mask":
-                labels = ImageClassifier.mask_cluster(t_images, mask_images)
             
             if labels is not None:
                 self._sub_classify_apply(labels, k, t_indices, t_class, s_name)
-                
-                if method == "whiteratio_zero":
-                    new_idx = self.state.num_classes - 2
-                    self.state.class_names[new_idx].set(f"{s_name}_白率0%")
-                    self.state.class_names[new_idx + 1].set(f"{s_name}_0%超")
-                    self.update_class_tabs()
-                elif method == "border_white":
-                    new_idx = self.state.num_classes - 2
-                    self.state.class_names[new_idx].set(f"{s_name}_外白なし")
-                    self.state.class_names[new_idx + 1].set(f"{s_name}_外白あり")
-                    self.update_class_tabs()
-                elif method == "mask":
-                    # マスクファイル名をサブクラス名に設定
+                # マスクプラグインの場合はオーバーレイを設定
+                if is_plugin and "マスク" in plugin_name and mask_images:
                     new_start = self.state.num_classes - k
                     for mi, mp in enumerate(mask_paths):
-                        basename = os.path.splitext(os.path.basename(mp))[0]
-                        self.state.class_names[new_start + mi].set(f"{s_name}_{basename}")
-                        # マスク画像をオーバーレイ用に保存
+                        self.state.class_names[new_start + mi].set(f"{s_name}_{os.path.splitext(os.path.basename(mp))[0]}")
                         self.state.mask_overlays[new_start + mi] = mask_images[mi]
                     self.state.class_names[new_start + len(mask_paths)].set(f"{s_name}_NoMatch")
                     self.update_class_tabs()

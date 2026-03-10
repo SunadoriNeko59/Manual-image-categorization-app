@@ -42,20 +42,19 @@ class AutoClassifyDialog:
 
         # 手法の選択
         tk.Label(self.dlg, text="分類手法", font=("Arial", 10, "bold")).pack(pady=(10, 5))
-        self.method_var = tk.StringVar(value="kmeans")
+        self.method_var = tk.StringVar(value="whiteratio")
         self.method_var.trace_add("write", lambda *_: self._on_method_change())
+        
+        # システム標準（特殊なUI連携が必要なもの）
         methods = [
-            ("K-Means (全体の見た目の類似度)", "kmeans"),
-            ("重なり領域ベース (位置依存・ホットスポット)", "overlap"),
             ("白率の範囲 (均等に分割)", "whiteratio"),
-            ("白率0%とそれ以外", "whiteratio_zero"),
-            ("白が外周に触れていない/触れている", "border_white"),
-            ("マスク画像判定 (白領域の重なり)", "mask"),
         ]
         
+        # プラグインの読み込み
         plugin_names = self.plugin_manager.get_plugin_names()
         for p_name in plugin_names:
-            methods.append((f"🧩 [プラグイン] {p_name}", f"plugin:{p_name}"))
+            # すでにプラグイン化された同名の手法が混在しないように注意
+            methods.append((f"{p_name}", f"plugin:{p_name}"))
             
         for text, val in methods:
             tk.Radiobutton(self.dlg, text=text, variable=self.method_var, value=val).pack(anchor="w", padx=20)
