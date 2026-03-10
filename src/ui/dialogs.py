@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Callable, List, Optional
 from ..core.state import AppState
+from ..core.plugin_manager import PluginManager
 
 class AutoClassifyDialog:
     """自動分類設定を行うためのダイアログ（モーダルウィンドウ）クラス。
@@ -25,6 +26,8 @@ class AutoClassifyDialog:
         self.dlg.resizable(False, False)
         self.state = state
         self.on_submit = on_submit_callback
+        
+        self.plugin_manager = PluginManager()
 
         # ターゲットの選択
         tk.Label(self.dlg, text="対象", font=("Arial", 10, "bold")).pack(pady=(10, 5))
@@ -49,6 +52,11 @@ class AutoClassifyDialog:
             ("白が外周に触れていない/触れている", "border_white"),
             ("マスク画像判定 (白領域の重なり)", "mask"),
         ]
+        
+        plugin_names = self.plugin_manager.get_plugin_names()
+        for p_name in plugin_names:
+            methods.append((f"🧩 [プラグイン] {p_name}", f"plugin:{p_name}"))
+            
         for text, val in methods:
             tk.Radiobutton(self.dlg, text=text, variable=self.method_var, value=val).pack(anchor="w", padx=20)
 
