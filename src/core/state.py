@@ -44,7 +44,7 @@ class AppState:
         # 全体設定
         self.alpha: Optional[tk.IntVar] = None # オーバーレイ赤色の透明度(0-255)
         self.whiteratio_mode: bool = False     # 現在白率ベースの分類モードかどうか
-        self.graph_type: tk.StringVar = tk.StringVar(value="sankey") # "sankey", "tree" または "bar"
+        self.graph_type: tk.StringVar = tk.StringVar(value="tree") # "tree" のみ
         self.overlap_dilation_pct: tk.DoubleVar = tk.DoubleVar(value=1.0) # 重なり領域ベースの膨張率(%)
 
     def clear_project(self) -> None:

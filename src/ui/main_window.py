@@ -11,7 +11,7 @@ from ..core.classifier import ImageClassifier
 from ..utils.logger import logger
 from ..utils.image_utils import white_ratio
 from .constants import THUMB_SIZE, CLASS_COLORS
-from .sankey_renderer import SankeyRenderer
+from .tree_renderer import TreeRenderer
 from .dialogs import AutoClassifyDialog
 
 class ImageMultiClassApp:
@@ -29,7 +29,7 @@ class ImageMultiClassApp:
         
         logger.info("UIの構築を開始します")
         self._build_ui()
-        self.sankey_renderer = SankeyRenderer(self.sankey_canvas, self.state)
+        self.tree_renderer = TreeRenderer(self.sankey_canvas, self.state)
         logger.info("アプリケーションの初期化が完了しました")
 
     def _build_ui(self) -> None:
@@ -39,7 +39,7 @@ class ImageMultiClassApp:
         tk.Button(top, text="フォルダ選択", command=self.load_folder).pack(side="left", padx=5)
         tk.Button(top, text="+ クラス追加", command=self.add_class).pack(side="left", padx=5)
         tk.Button(top, text="Excel保存", command=self.save_excel).pack(side="left", padx=5)
-        tk.Button(top, text="グラフ保存", command=self.save_sankey_image).pack(side="left", padx=5)
+        tk.Button(top, text="グラフ保存", command=self.save_tree_image).pack(side="left", padx=5)
         tk.Button(top, text="自動分類", command=self.open_auto_classify_dialog).pack(side="left", padx=5)
         self.undo_btn = tk.Button(top, text="⏮ 1つ前に戻る", state="disabled", command=self.undo_classification)
         self.undo_btn.pack(side="left", padx=5)
@@ -65,12 +65,7 @@ class ImageMultiClassApp:
         # 初期幅を持たせつつ、ドラッグでサイズ変更可能にする (pack_propagate(False)は削除)
         main.add(right, weight=1)
 
-        tk.Label(right, text="表示形式:", font=("Arial", 9)).pack(anchor="w", pady=(5, 0))
-        graph_type_frame = tk.Frame(right)
-        graph_type_frame.pack(anchor="w", fill="x", pady=2)
-        tk.Radiobutton(graph_type_frame, text="サンキー", variable=self.state.graph_type, value="sankey", command=self._on_graph_type_change).pack(side="left", padx=5)
-        tk.Radiobutton(graph_type_frame, text="ツリー", variable=self.state.graph_type, value="tree", command=self._on_graph_type_change).pack(side="left", padx=5)
-        tk.Radiobutton(graph_type_frame, text="棒グラフ", variable=self.state.graph_type, value="bar", command=self._on_graph_type_change).pack(side="left", padx=5)
+# 表示形式の選択肢はツリーのみのため削除
 
         tk.Label(right, text="クラス設定", font=("Arial", 10, "bold")).pack(anchor="w", pady=(10, 0))
         self.class_name_frame = tk.Frame(right)
@@ -118,13 +113,9 @@ class ImageMultiClassApp:
         canvas.bind_all("<MouseWheel>", lambda event, c=canvas: c.yview_scroll(int(-event.delta / 120), "units") if str(c.winfo_class()) == "Canvas" else None)
         return tab, canvas, inner_frame
 
-    def _on_graph_type_change(self) -> None:
-        """グラフの表示形式（Sankey / Tree）が変更された際の処理"""
-        self.sankey_renderer.draw()
-
     def _on_alpha_change(self) -> None:
         ImageClassifier.rebuild_all_overlays(self.state)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
 
     # --- Folder & Class Management ---
     def load_folder(self) -> None:
@@ -162,7 +153,7 @@ class ImageMultiClassApp:
             for c in range(self.state.num_classes):
                 self._create_checkbutton(frame, idx, c)
 
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
         self.count_label.config(text=f"画像数: {len(self.state.images)} / チェック総数: 0")
         logger.info(f"{len(self.state.images)}枚の画像を読み込みました")
@@ -182,7 +173,7 @@ class ImageMultiClassApp:
             new_color = color_tuple[1]
             self.state.class_colors_used[class_idx] = new_color
             label_widget.config(bg=new_color)
-            self.sankey_renderer.draw()
+            self.tree_renderer.draw()
 
     def _create_class(self, name: str) -> None:
         name_var = tk.StringVar(value=name)
@@ -224,7 +215,7 @@ class ImageMultiClassApp:
             var = tk.BooleanVar()
             self.state.class_vars[i].append(var)
             self._create_checkbutton(frame, i, idx)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
 
     def _create_checkbutton(self, parent_frame: tk.Frame, img_idx: int, c_idx: int) -> None:
         var = self.state.class_vars[img_idx][c_idx]
@@ -232,13 +223,13 @@ class ImageMultiClassApp:
                        command=lambda: self.on_check(img_idx, c_idx, var)).pack(anchor="w")
 
     def _on_class_name_changed(self) -> None:
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
 
     def on_check(self, img_idx: int, c_idx: int, var: tk.BooleanVar) -> None:
         self.state.class_counts[c_idx] += 1 if var.get() else -1
         ImageClassifier.rebuild_overlay(self.state, c_idx)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
         self.count_label.config(text=f"画像数: {len(self.state.images)} / チェック総数: {sum(self.state.class_counts)}")
 
@@ -336,11 +327,11 @@ class ImageMultiClassApp:
 
         logger.info("Undo: 前の状態に復元しました")
         ImageClassifier.rebuild_all_overlays(self.state)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
 
-    # --- Sankey Save ---
-    def save_sankey_image(self) -> None:
+    # --- Tree Save ---
+    def save_tree_image(self) -> None:
         if self.state.num_classes == 0 or not self.state.images:
             messagebox.showwarning("警告", "保存するデータがありません")
             return
@@ -348,7 +339,7 @@ class ImageMultiClassApp:
         filepath = filedialog.asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("All Files", "*.*")],
-            title="サンキーダイアグラムを保存"
+            title="ツリーダイアグラムを保存"
         )
         if not filepath:
             return
@@ -375,10 +366,10 @@ class ImageMultiClassApp:
 
             img = ImageGrab.grab(bbox=bbox)
             img.save(filepath)
-            logger.info(f"サンキーダイアグラムを保存しました: {filepath}")
-            messagebox.showinfo("保存完了", f"サンキーダイアグラムを保存しました\n{filepath}")
+            logger.info(f"ツリーダイアグラムを保存しました: {filepath}")
+            messagebox.showinfo("保存完了", f"ツリーダイアグラムを保存しました\n{filepath}")
         except Exception as e:
-            logger.error(f"サンキーダイアグラムの保存失敗: {e}")
+            logger.error(f"ツリーダイアグラムの保存失敗: {e}")
             messagebox.showerror("エラー", f"画像の保存に失敗しました\n{e}")
 
     # --- Auto Classification Routing ---
@@ -520,7 +511,7 @@ class ImageMultiClassApp:
             self.state.class_counts[label] += 1
         self._build_tree(k)
         ImageClassifier.rebuild_all_overlays(self.state)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
 
     def _build_tree(self, k: int) -> None:
@@ -569,7 +560,7 @@ class ImageMultiClassApp:
                 parent_node["count"] = self.state.class_counts[target_class]
 
         ImageClassifier.rebuild_all_overlays(self.state)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
 
     def _find_tree_node(self, node: dict, class_idx: int) -> Optional[dict]:
@@ -597,7 +588,7 @@ class ImageMultiClassApp:
                 if v.get(): self.state.class_counts[c] += 1
 
         ImageClassifier.rebuild_all_overlays(self.state)
-        self.sankey_renderer.draw()
+        self.tree_renderer.draw()
         self.update_class_tabs()
 
     def save_excel(self) -> None:
