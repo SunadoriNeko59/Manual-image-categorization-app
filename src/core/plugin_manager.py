@@ -20,7 +20,11 @@ class PluginManager:
         """指定されたディレクトリから.pyファイルを検索し、プラグイン関数として読み込む"""
         self.plugins.clear()
         
-        # main.pyからの相対パス、または絶対パスで解決
+        # main.pyなどからの相対パスでも確実に見つけるために絶対パス化
+        if not os.path.isabs(self.plugins_dir):
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            self.plugins_dir = os.path.join(base_dir, self.plugins_dir)
+            
         if not os.path.exists(self.plugins_dir):
             try:
                 os.makedirs(self.plugins_dir)

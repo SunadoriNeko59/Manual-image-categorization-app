@@ -27,6 +27,7 @@ class ImageMultiClassApp:
         self.state.alpha = tk.IntVar(value=128)
         
         self.class_tabs = []    # [(tab_frame, canvas, inner_frame), ...]
+        self.class_range_frames = [] # UI上での%指定フレームの参照管理リスト
         
         logger.info("UIの構築を開始します")
         self._build_ui()
@@ -163,6 +164,7 @@ class ImageMultiClassApp:
         for w in self.frame_all.winfo_children(): w.destroy()
         for tab_tuple in self.class_tabs: self.notebook.forget(tab_tuple[0])
         self.class_tabs.clear()
+        self.class_range_frames.clear()
         for w in self.class_name_frame.winfo_children(): w.destroy()
         self.sankey_canvas.delete("all")
         self.state.clear_project()
@@ -203,7 +205,19 @@ class ImageMultiClassApp:
         tk.Label(rf, text="%~").pack(side="left")
         tk.Entry(rf, textvariable=self.state.class_ranges[idx][1], width=4).pack(side="left")
         tk.Label(rf, text="%").pack(side="left")
+        
+        self.class_range_frames.append(rf)
         if self.state.whiteratio_mode: rf.pack(side="left")
+        
+    def set_whiteratio_mode(self, enabled: bool) -> None:
+        """白率(%範囲)変更モードのUI全体の表示・非表示を切り替えます。"""
+        self.state.whiteratio_mode = enabled
+        if enabled:
+            self.reclassify_btn.pack(side="left", padx=5)
+            for rf in self.class_range_frames: rf.pack(side="left")
+        else:
+            self.reclassify_btn.pack_forget()
+            for rf in self.class_range_frames: rf.pack_forget()
 
     def add_class(self) -> None:
         if not self.state.images: return
@@ -282,6 +296,7 @@ class ImageMultiClassApp:
             self.notebook.forget(tab_tuple[0])
             tab_tuple[0].destroy()
         self.class_tabs.clear()
+        self.class_range_frames.clear()
         for w in self.class_name_frame.winfo_children(): w.destroy()
         self.sankey_canvas.delete("all")
         
@@ -292,6 +307,8 @@ class ImageMultiClassApp:
         self.state.clear_classes()
         self.state.classification_tree = h["classification_tree"]
         self.state.whiteratio_mode = h["whiteratio_mode"]
+        if "current_whiteratio_target" in h:
+            self.state.current_whiteratio_target = h["current_whiteratio_target"]
         if "graph_type" in h:
             self.state.graph_type.set(h["graph_type"])
         if "overlap_dilation_pct" in h:
@@ -402,29 +419,47 @@ class ImageMultiClassApp:
 
         if target == "all":
             prefix = plugin_name if is_plugin else "白率"
-            self._reset_classes(k, prefix=prefix)
             
+            labels = None
             if is_plugin:
                 try:
                     pm = PluginManager()
                     labels = pm.execute_plugin(plugin_name, self.state.images, self.state, k, mask_images=mask_images)
-                    if labels is not None:
-                        self._apply_labels(labels, k)
-                        # マスクプラグインの場合はオーバーレイを設定
-                        if "マスク" in plugin_name and mask_images:
-                            for mi, mp in enumerate(mask_paths):
-                                if mi < self.state.num_classes:
-                                    self.state.mask_overlays[mi] = mask_images[mi]
-                                    self.state.class_names[mi].set(os.path.splitext(os.path.basename(mp))[0])
-                            if len(mask_images) < self.state.num_classes:
-                                self.state.class_names[len(mask_images)].set("No Match")
+                    if labels is not None and len(labels) > 0:
+                        max_label = max(labels)
+                        if max_label >= k:
+                            k = max_label + 1
                 except Exception as e:
                     logger.error(f"プラグイン実行エラー: {e}")
                     messagebox.showerror("エラー", f"プラグインの実行に失敗しました\n{e}")
                     return
+            
+            self._reset_classes(k, prefix=prefix)
+            
+            if is_plugin:
+                if labels is not None:
+                    self._apply_labels(labels, k)
+                    # マスクプラグインの場合はオーバーレイを設定
+                    if "マスク" in plugin_name and mask_images:
+                        for mi, mp in enumerate(mask_paths):
+                            if mi < self.state.num_classes:
+                                self.state.mask_overlays[mi] = mask_images[mi]
+                                self.state.class_names[mi].set(os.path.splitext(os.path.basename(mp))[0])
+                        if len(mask_images) < self.state.num_classes:
+                            self.state.class_names[len(mask_images)].set("No Match")
+                            
+                    if "白の面積で分ける" in plugin_name:
+                        self.set_whiteratio_mode(True)
+                        self.state.current_whiteratio_target = "all"
+                        step = 100.0 / k
+                        for i in range(k):
+                            self.state.class_ranges[i][0].set(round(i*step, 1))
+                            self.state.class_ranges[i][1].set(round((i+1)*step, 1))
+                            self.state.class_names[i].set(f"{i*step:.0f}%〜{(i+1)*step:.0f}%")
+                            
             elif method == "whiteratio":
-                self.state.whiteratio_mode = True
-                self.reclassify_btn.pack(side="left", padx=5)
+                self.set_whiteratio_mode(True)
+                self.state.current_whiteratio_target = "all"
                 step = 100.0 / k
                 for i in range(k):
                     self.state.class_ranges[i][0].set(round(i*step, 1))
@@ -438,6 +473,7 @@ class ImageMultiClassApp:
             s_name = self.state.class_names[t_class].get()
             t_images = [self.state.images[i] for i in t_indices]
 
+            labels = None
             if is_plugin:
                 try:
                     pm = PluginManager()
@@ -446,9 +482,29 @@ class ImageMultiClassApp:
                     logger.error(f"プラグイン実行エラー: {e}")
                     messagebox.showerror("エラー", f"プラグインの実行に失敗しました\n{e}")
                     return
+            elif method == "whiteratio":
+                labels = []
+                step = 100.0 / k
+                for idx in t_indices:
+                    ratio = self.state.white_ratios[idx] * 100
+                    bin_idx = int(ratio / step)
+                    if bin_idx >= k:
+                        bin_idx = k - 1
+                    labels.append(bin_idx)
             
             if labels is not None:
+                if is_plugin and len(labels) > 0:
+                    max_label = max(labels)
+                    if max_label >= k:
+                        k = max_label + 1
                 self._sub_classify_apply(labels, k, t_indices, t_class, s_name)
+                
+                # 特定クラスの分類時に白率モードならばターゲット情報を保存
+                if method == "whiteratio" or (is_plugin and "白の面積で分ける" in plugin_name):
+                    self.set_whiteratio_mode(True)
+                    new_start = self.state.num_classes - k
+                    self.state.current_whiteratio_target = ("sub", t_indices, range(new_start, new_start + k))
+
                 # マスクプラグインの場合はオーバーレイを設定
                 if is_plugin and "マスク" in plugin_name and mask_images:
                     new_start = self.state.num_classes - k
@@ -461,10 +517,11 @@ class ImageMultiClassApp:
     def _reset_classes(self, k: int, prefix: str) -> None:
         for tab_tuple in self.class_tabs: self.notebook.forget(tab_tuple[0])
         self.class_tabs.clear()
+        self.class_range_frames.clear()
         for w in self.class_name_frame.winfo_children(): w.destroy()
         
         self.state.clear_classes()
-        self.reclassify_btn.pack_forget()
+        self.set_whiteratio_mode(False)
 
         for i in range(k):
             name = f"{prefix} {i+1}"
@@ -495,8 +552,7 @@ class ImageMultiClassApp:
             })
 
     def _sub_classify_apply(self, labels: list[int], k: int, target_indices: list[int], target_class: int, source_class_name: str) -> None:
-        self.reclassify_btn.pack_forget()
-        self.state.whiteratio_mode = False
+        self.set_whiteratio_mode(False)
         
         for idx in target_indices: self.state.class_vars[idx][target_class].set(False)
         self.state.class_counts[target_class] = sum(1 for vp in self.state.class_vars if vp[target_class].get())
@@ -548,12 +604,36 @@ class ImageMultiClassApp:
         self.state.save_state()
         self.undo_btn.config(state="normal")
         
-        for idx, (vp, ratio) in enumerate(zip(self.state.class_vars, self.state.white_ratios)):
-            for v in vp: v.set(False)
-            ratio_pct = ratio * 100
-            for c, (min_var, max_var) in enumerate(self.state.class_ranges):
-                if min_var.get() <= ratio_pct <= max_var.get():
-                    vp[c].set(True); break
+        target_info = self.state.current_whiteratio_target
+
+        if target_info == "all" or target_info is None:
+            # すべての画像を対象に再分類
+            for idx, (vp, ratio) in enumerate(zip(self.state.class_vars, self.state.white_ratios)):
+                for v in vp: v.set(False)
+                ratio_pct = ratio * 100
+                for c, (min_var, max_var) in enumerate(self.state.class_ranges):
+                    if min_var.get() <= ratio_pct <= max_var.get():
+                        vp[c].set(True); break
+        elif isinstance(target_info, tuple) and target_info[0] == "sub":
+            # 特定の画像インデックス群のみを対象に再分類
+            _, t_indices, target_classes = target_info
+            
+            # 対象の画像に対してのみ適用
+            for idx in t_indices:
+                vp = self.state.class_vars[idx]
+                ratio_pct = self.state.white_ratios[idx] * 100
+                
+                # ターゲットとされたサブクラスのチェックを一旦外す
+                for c in target_classes:
+                    vp[c].set(False)
+                    
+                # 設定されたパーセンテージに合致するサブクラスを捜してチェックを入れる
+                for c in target_classes:
+                    min_val = self.state.class_ranges[c][0].get()
+                    max_val = self.state.class_ranges[c][1].get()
+                    if min_val <= ratio_pct <= max_val:
+                        vp[c].set(True)
+                        break
         
         for i in range(self.state.num_classes): self.state.class_counts[i] = 0
         for vp in self.state.class_vars:

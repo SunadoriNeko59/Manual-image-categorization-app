@@ -44,6 +44,7 @@ class AppState:
         # 全体設定
         self.alpha: Optional[tk.IntVar] = None # オーバーレイ赤色の透明度(0-255)
         self.whiteratio_mode: bool = False     # 現在白率ベースの分類モードかどうか
+        self.current_whiteratio_target: Optional[Any] = None # 白率再分類の対象（"all" または ("sub", t_indices, range)）
         self.graph_type: tk.StringVar = tk.StringVar(value="tree") # "tree" のみ
         self.overlap_dilation_pct: tk.DoubleVar = tk.DoubleVar(value=1.0) # 重なり領域ベースの膨張率(%)
 
@@ -68,6 +69,7 @@ class AppState:
         self.classification_tree = None
         self.hidden_checkboxes.clear()
         self.mask_overlays.clear()
+        self.current_whiteratio_target = None
         
         # graph_type と alpha, whiteratio_mode は基本的にリセット後も引き継ぐ想定
 
@@ -85,6 +87,7 @@ class AppState:
             "class_vars": [[v.get() for v in vp] for vp in self.class_vars],
             "classification_tree": copy.deepcopy(self.classification_tree),
             "whiteratio_mode": self.whiteratio_mode,
+            "current_whiteratio_target": copy.deepcopy(self.current_whiteratio_target),
             "graph_type": self.graph_type.get(),
             "overlap_dilation_pct": self.overlap_dilation_pct.get(),
             "hidden_checkboxes": set(self.hidden_checkboxes)

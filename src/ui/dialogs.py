@@ -65,9 +65,10 @@ class AutoClassifyDialog:
         tk.Spinbox(self.dlg, from_=2, to=20, textvariable=self.k_var, width=5).pack(anchor="w", padx=20)
 
         # 膨張率の設定 (重なり領域ベース用)
-        tk.Label(self.dlg, text="膨張率(%) [重なり領域ベース用]:").pack(anchor="w", padx=20, pady=(10, 0))
+        self.dilation_frame = tk.Frame(self.dlg)
+        tk.Label(self.dilation_frame, text="膨張率(%) [重なり領域ベース用]:").pack(anchor="w", padx=20, pady=(10, 0))
         self.dilation_var = tk.DoubleVar(value=self.state.overlap_dilation_pct.get())
-        tk.Spinbox(self.dlg, from_=0.1, to=20.0, increment=0.1, format="%.1f", textvariable=self.dilation_var, width=5).pack(anchor="w", padx=20)
+        tk.Spinbox(self.dilation_frame, from_=0.1, to=20.0, increment=0.1, format="%.1f", textvariable=self.dilation_var, width=5).pack(anchor="w", padx=20)
 
         # マスク画像選択フレーム（初期は非表示）
         self.mask_frame = tk.LabelFrame(self.dlg, text="マスク画像の選択 (最大5枚)", padx=10, pady=5)
@@ -92,11 +93,17 @@ class AutoClassifyDialog:
         tk.Button(btn_frame, text="キャンセル", width=10, command=self.dlg.destroy).pack(side="left", padx=5)
 
     def _on_method_change(self) -> None:
-        """分類手法が変更されたとき、マスク選択UIの表示/非表示を切り替えます。"""
-        if self.method_var.get() == "mask":
+        """分類手法が変更されたとき、UIの表示/非表示を切り替えます。"""
+        method = self.method_var.get()
+        if "マスク" in method:
             self.mask_frame.pack(anchor="w", padx=20, pady=(10, 5), fill="x")
         else:
             self.mask_frame.pack_forget()
+            
+        if "重なり領域" in method:
+            self.dilation_frame.pack(anchor="w", fill="x")
+        else:
+            self.dilation_frame.pack_forget()
 
     def _browse_mask(self, idx: int) -> None:
         """マスク画像の参照ボタンが押されたとき、ファイル選択ダイアログを表示します。"""
